@@ -1,9 +1,5 @@
-const { initTracer, withSpan } = require('../shared/tracer');
+const { withSpan, addSpanAttributes } = require('../shared/tracer');
 const { createResponse } = require('../shared/utils');
-const api = require('@opentelemetry/api');
-
-// Initialize tracer for Payment Service
-const tracer = initTracer('payment-service');
 
 // Mock payment processing
 const FAILURE_PATTERNS = {
@@ -51,6 +47,7 @@ function processPayment(paymentMethod, amount) {
 /**
  * Payment Service Lambda Handler
  * This service processes payments with failure scenarios for testing
+ * OpenTelemetry instrumentation is automatically provided by the Lambda Layer
  */
 exports.handler = async (event) => {
   console.log('Payment Service received event:', JSON.stringify(event));
@@ -63,27 +60,31 @@ exports.handler = async (event) => {
 
       // Validate input
       if (!orderId || !customerId || !amount || !paymentMethod) {
-        span.setStatus({ code: api.SpanStatusCode.ERROR, message: 'Invalid input' });
-        span.setAttribute('error', true);
-        span.setAttribute('error.message', 'Missing required fields');
+        addSpanAttributes({
+          'error': true,
+          'error.message': 'Missing required fields',
+        });
         return createResponse(400, {
           success: false,
           error: 'Missing required fields: orderId, customerId, amount, paymentMethod',
         });
       }
 
-      span.setAttribute('order.id', orderId);
-      span.setAttribute('customer.id', customerId);
-      span.setAttribute('payment.amount', amount);
-      span.setAttribute('payment.method', paymentMethod);
+      addSpanAttributes({
+        'order.id': orderId,
+        'customer.id': customerId,
+        'payment.amount': amount,
+        'payment.method': paymentMethod,
+      });
 
       console.log(`Processing payment for order ${orderId}, amount: ${amount}`);
 
       // Validate amount
       if (amount <= 0) {
-        span.setStatus({ code: api.SpanStatusCode.ERROR, message: 'Invalid amount' });
-        span.setAttribute('error', true);
-        span.setAttribute('error.message', 'Invalid payment amount');
+        addSpanAttributes({
+          'error': true,
+          'error.message': 'Invalid payment amount',
+        });
         return createResponse(400, {
           success: false,
           error: 'Invalid payment amount',
@@ -93,11 +94,14 @@ exports.handler = async (event) => {
       // Process payment
       const paymentResult = processPayment(paymentMethod, amount);
 
-      span.setAttribute('payment.success', paymentResult.success);
+      addSpanAttributes({
+        'payment.success': paymentResult.success,
+      });
 
       if (!paymentResult.success) {
-        span.setAttribute('payment.failure_reason', paymentResult.reason);
-        span.setStatus({ code: api.SpanStatusCode.OK }); // Business logic, not a technical error
+        addSpanAttributes({
+          'payment.failure_reason': paymentResult.reason,
+        });
         
         console.log(`Payment failed for order ${orderId}: ${paymentResult.reason}`);
         
@@ -109,8 +113,9 @@ exports.handler = async (event) => {
         });
       }
 
-      span.setAttribute('payment.transaction_id', paymentResult.transactionId);
-      span.setStatus({ code: api.SpanStatusCode.OK });
+      addSpanAttributes({
+        'payment.transaction_id': paymentResult.transactionId,
+      });
 
       console.log(`Payment successful for order ${orderId}. Transaction ID: ${paymentResult.transactionId}`);
 
@@ -124,8 +129,10 @@ exports.handler = async (event) => {
 
     } catch (error) {
       console.error('Payment processing error:', error);
-      span.setStatus({ code: api.SpanStatusCode.ERROR, message: error.message });
-      span.recordException(error);
+      addSpanAttributes({
+        'error': true,
+        'error.message': error.message,
+      });
       
       return createResponse(500, {
         success: false,

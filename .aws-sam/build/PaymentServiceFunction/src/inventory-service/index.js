@@ -1,9 +1,5 @@
-const { initTracer, withSpan } = require('../shared/tracer');
+const { withSpan, addSpanAttributes } = require('../shared/tracer');
 const { createResponse } = require('../shared/utils');
-const api = require('@opentelemetry/api');
-
-// Initialize tracer for Inventory Service
-const tracer = initTracer('inventory-service');
 
 // Mock inventory database
 const inventory = {
@@ -17,6 +13,7 @@ const inventory = {
 /**
  * Inventory Service Lambda Handler
  * This service checks if requested items are available in inventory
+ * OpenTelemetry instrumentation is automatically provided by the Lambda Layer
  */
 exports.handler = async (event) => {
   console.log('Inventory Service received event:', JSON.stringify(event));
@@ -29,17 +26,20 @@ exports.handler = async (event) => {
 
       // Validate input
       if (!orderId || !items || !Array.isArray(items)) {
-        span.setStatus({ code: api.SpanStatusCode.ERROR, message: 'Invalid input' });
-        span.setAttribute('error', true);
-        span.setAttribute('error.message', 'Missing or invalid required fields');
+        addSpanAttributes({
+          'error': true,
+          'error.message': 'Missing or invalid required fields',
+        });
         return createResponse(400, {
           available: false,
           error: 'Missing or invalid required fields: orderId, items (array)',
         });
       }
 
-      span.setAttribute('order.id', orderId);
-      span.setAttribute('inventory.items.count', items.length);
+      addSpanAttributes({
+        'order.id': orderId,
+        'inventory.items.count': items.length,
+      });
 
       console.log(`Checking inventory for order ${orderId}`);
 
@@ -54,7 +54,9 @@ exports.handler = async (event) => {
           continue;
         }
 
-        span.setAttribute(`inventory.item.${itemId}.requested`, quantity);
+        addSpanAttributes({
+          [`inventory.item.${itemId}.requested`]: quantity,
+        });
 
         // Check if item exists in inventory
         if (!inventory[itemId]) {
@@ -64,12 +66,16 @@ exports.handler = async (event) => {
             reason: 'Item not found',
           });
           allAvailable = false;
-          span.setAttribute(`inventory.item.${itemId}.status`, 'not-found');
+          addSpanAttributes({
+            [`inventory.item.${itemId}.status`]: 'not-found',
+          });
           continue;
         }
 
         const availableQuantity = inventory[itemId].quantity;
-        span.setAttribute(`inventory.item.${itemId}.available`, availableQuantity);
+        addSpanAttributes({
+          [`inventory.item.${itemId}.available`]: availableQuantity,
+        });
 
         // Check if sufficient quantity is available
         if (availableQuantity < quantity) {
@@ -82,19 +88,24 @@ exports.handler = async (event) => {
             reason: availableQuantity === 0 ? 'Out of stock' : 'Insufficient quantity',
           });
           allAvailable = false;
-          span.setAttribute(`inventory.item.${itemId}.status`, 'insufficient');
+          addSpanAttributes({
+            [`inventory.item.${itemId}.status`]: 'insufficient',
+          });
         } else {
           console.log(`Item ${itemId} is available. Requested: ${quantity}, Available: ${availableQuantity}`);
-          span.setAttribute(`inventory.item.${itemId}.status`, 'available');
+          addSpanAttributes({
+            [`inventory.item.${itemId}.status`]: 'available',
+          });
         }
       }
 
-      span.setAttribute('inventory.all_available', allAvailable);
-      span.setAttribute('inventory.unavailable_count', unavailableItems.length);
+      addSpanAttributes({
+        'inventory.all_available': allAvailable,
+        'inventory.unavailable_count': unavailableItems.length,
+      });
 
       if (allAvailable) {
         console.log(`All items available for order ${orderId}`);
-        span.setStatus({ code: api.SpanStatusCode.OK });
         
         return createResponse(200, {
           available: true,
@@ -103,8 +114,9 @@ exports.handler = async (event) => {
         });
       } else {
         console.log(`Some items unavailable for order ${orderId}:`, unavailableItems);
-        span.setAttribute('inventory.failure_reason', 'items-unavailable');
-        span.setStatus({ code: api.SpanStatusCode.OK }); // Business logic, not an error
+        addSpanAttributes({
+          'inventory.failure_reason': 'items-unavailable',
+        });
         
         return createResponse(200, {
           available: false,
@@ -116,8 +128,10 @@ exports.handler = async (event) => {
 
     } catch (error) {
       console.error('Inventory check error:', error);
-      span.setStatus({ code: api.SpanStatusCode.ERROR, message: error.message });
-      span.recordException(error);
+      addSpanAttributes({
+        'error': true,
+        'error.message': error.message,
+      });
       
       return createResponse(500, {
         available: false,

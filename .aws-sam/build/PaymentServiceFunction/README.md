@@ -1,6 +1,6 @@
 # Lambda OpenTelemetry Demo
 
-A comprehensive AWS Lambda project demonstrating how to integrate OpenTelemetry for end-to-end distributed tracing across multiple microservices without using AWS CloudWatch or X-Ray.
+A comprehensive AWS Lambda project demonstrating how to integrate OpenTelemetry for end-to-end distributed tracing across multiple microservices **without using AWS CloudWatch or X-Ray**, using the **AWS Distro for OpenTelemetry (ADOT) Lambda Layer** for automatic instrumentation.
 
 ## 🎯 Overview
 
@@ -40,12 +40,13 @@ The services communicate with each other while propagating trace context using O
 
 ## ✨ Features
 
-- ✅ **OpenTelemetry Integration** - Native OpenTelemetry instrumentation without AWS-specific dependencies
+- ✅ **AWS ADOT Lambda Layer** - Uses AWS Distro for OpenTelemetry Lambda Layer for zero-code instrumentation
+- ✅ **Automatic Instrumentation** - Auto-instruments Lambda, HTTP/HTTPS, and AWS SDK without code changes
 - ✅ **Distributed Tracing** - End-to-end trace propagation across Lambda functions
 - ✅ **W3C Trace Context** - Standard trace context propagation using W3C format
 - ✅ **OTLP Export** - Exports traces using OTLP HTTP protocol
-- ✅ **Automatic Instrumentation** - Auto-instrumentation for HTTP/HTTPS requests
-- ✅ **Custom Spans** - Manual span creation for business logic
+- ✅ **Custom Spans** - Manual span creation for business logic insights
+- ✅ **No CloudWatch/X-Ray** - Direct export to any OpenTelemetry-compatible backend
 - ✅ **Error Scenarios** - Built-in test scenarios for:
   - Out of stock items
   - Payment failures (card declined, insufficient funds)
@@ -73,7 +74,10 @@ You need an OpenTelemetry-compatible backend to receive and visualize traces. He
 #### Option A: Jaeger (Recommended for local testing)
 
 ```bash
-# Run Jaeger all-in-one with Docker
+# Run Jaeger all-in-one with Docker (or use docker-compose)
+docker-compose up -d jaeger
+
+# Or manually:
 docker run -d --name jaeger \
   -e COLLECTOR_OTLP_ENABLED=true \
   -p 16686:16686 \
@@ -96,9 +100,23 @@ docker run -d --name zipkin \
 
 #### Option C: Grafana Cloud, Honeycomb, or other SaaS providers
 
-Configure the OTEL_EXPORTER_OTLP_ENDPOINT environment variable with your provider's endpoint.
+Configure the OTEL_EXPORTER_OTLP_ENDPOINT parameter with your provider's endpoint.
 
-### 3. Deploy to AWS
+### 3. Update Lambda Layer ARN
+
+**Important**: Update the `AdotLayerArn` parameter in `template.yaml` with the correct ARN for your AWS region.
+
+Find the latest ARN for your region here:
+- https://aws-otel.github.io/docs/getting-started/lambda/lambda-js
+
+Example ARNs:
+- **us-east-1**: `arn:aws:lambda:us-east-1:901920570463:layer:aws-otel-nodejs-amd64-ver-1-18-1:5`
+- **us-west-2**: `arn:aws:lambda:us-west-2:901920570463:layer:aws-otel-nodejs-amd64-ver-1-18-1:5`
+- **eu-west-1**: `arn:aws:lambda:eu-west-1:901920570463:layer:aws-otel-nodejs-amd64-ver-1-18-1:5`
+
+See [ADOT-LAYER-CONFIG.md](./ADOT-LAYER-CONFIG.md) for complete list.
+
+### 4. Deploy to AWS
 
 ```bash
 # Build the Lambda functions
@@ -111,12 +129,16 @@ sam deploy --guided
 ```
 
 During `sam deploy --guided`, you'll be prompted to provide:
-- Stack name (e.g., `lambda-otel-demo`)
-- AWS Region
-- OpenTelemetry Collector endpoint (use your backend URL)
+- **Stack name** (e.g., `lambda-otel-demo`)
+- **AWS Region** (e.g., `us-east-1`)
+- **OtelCollectorEndpoint** - Your OpenTelemetry Collector endpoint without `/v1/traces` (e.g., `http://your-collector:4318`)
+- **Environment** - Deployment environment (e.g., `production`, `staging`)
+- **AdotLayerArn** - AWS ADOT Lambda Layer ARN for your region
 - Confirm changes before deployment
 
-### 4. Test the Services
+**Note**: If you're using a collector in a VPC, ensure your Lambda functions have VPC access configured.
+
+### 5. Test the Services
 
 Use the provided test script:
 
@@ -134,12 +156,71 @@ curl -X POST https://your-api-endpoint/Prod/order \
   -d @test-payloads.json
 ```
 
-### 5. View Traces
+### 6. View Traces
 
 Open your tracing backend UI:
 - Jaeger: http://localhost:16686
 - Select service: `order-service`
 - Click "Find Traces" to view the end-to-end traces
+
+## 🔧 AWS ADOT Lambda Layer
+
+This project uses the **AWS Distro for OpenTelemetry (ADOT) Lambda Layer** for automatic instrumentation. The layer provides:
+
+### Key Benefits
+
+1. **Zero-Code Instrumentation** - Auto-instruments your Lambda function without code changes
+2. **No Dependency Bundling** - OpenTelemetry SDKs are provided by the layer, reducing deployment package size
+3. **Automatic Context Propagation** - Trace context is automatically propagated across service calls
+4. **AWS-Optimized** - Maintained and supported by AWS with regular updates
+
+### How It Works
+
+The layer works through the `AWS_LAMBDA_EXEC_WRAPPER` environment variable:
+
+```yaml
+Environment:
+  Variables:
+    AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler  # Enables auto-instrumentation
+    OTEL_SERVICE_NAME: order-service              # Service identifier
+    OTEL_TRACES_SAMPLER: AlwaysOn                 # Sampling strategy
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
+```
+
+When your Lambda function is invoked:
+1. The wrapper initializes OpenTelemetry SDK
+2. Auto-instrumentation is activated for HTTP, AWS SDK, and Lambda runtime
+3. A root span is created for the Lambda invocation
+4. Your handler executes within the trace context
+5. Spans are exported to your configured OTLP endpoint
+
+### What Gets Instrumented Automatically
+
+- ✅ Lambda function invocations
+- ✅ HTTP/HTTPS requests (axios, node-fetch, native http/https)
+- ✅ AWS SDK v2 and v3 calls
+- ✅ Database clients (when using instrumented libraries)
+- ✅ Trace context propagation in headers
+
+### Adding Custom Instrumentation
+
+While the layer handles most instrumentation automatically, you can add custom spans for business logic:
+
+```javascript
+const api = require('@opentelemetry/api');
+
+exports.handler = async (event) => {
+  const tracer = api.trace.getTracer('my-service');
+  
+  return tracer.startActiveSpan('custom-operation', async (span) => {
+    span.setAttribute('business.attribute', 'value');
+    // Your logic here
+    span.end();
+  });
+};
+```
+
+For detailed configuration options, see [ADOT-LAYER-CONFIG.md](./ADOT-LAYER-CONFIG.md).
 
 ## 📝 Test Scenarios
 

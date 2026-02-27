@@ -1,13 +1,10 @@
-const { initTracer, withSpan } = require('../shared/tracer');
+const { withSpan, addSpanAttributes } = require('../shared/tracer');
 const { callService, createResponse } = require('../shared/utils');
-const api = require('@opentelemetry/api');
-
-// Initialize tracer for Order Service
-const tracer = initTracer('order-service');
 
 /**
  * Order Service Lambda Handler
  * This service accepts orders and orchestrates calls to Inventory and Payment services
+ * OpenTelemetry instrumentation is automatically provided by the Lambda Layer
  */
 exports.handler = async (event) => {
   console.log('Order Service received event:', JSON.stringify(event));
@@ -20,9 +17,10 @@ exports.handler = async (event) => {
 
       // Validate input
       if (!orderId || !customerId || !items || !paymentMethod) {
-        span.setStatus({ code: api.SpanStatusCode.ERROR, message: 'Invalid input' });
-        span.setAttribute('error', true);
-        span.setAttribute('error.message', 'Missing required fields');
+        addSpanAttributes({
+          'error': true,
+          'error.message': 'Missing required fields',
+        });
         return createResponse(400, {
           success: false,
           error: 'Missing required fields: orderId, customerId, items, paymentMethod',
@@ -30,10 +28,12 @@ exports.handler = async (event) => {
       }
 
       // Add order details to span
-      span.setAttribute('order.id', orderId);
-      span.setAttribute('customer.id', customerId);
-      span.setAttribute('order.items.count', items.length);
-      span.setAttribute('payment.method', paymentMethod);
+      addSpanAttributes({
+        'order.id': orderId,
+        'customer.id': customerId,
+        'order.items.count': items.length,
+        'payment.method': paymentMethod,
+      });
 
       console.log(`Processing order ${orderId} for customer ${customerId}`);
 
@@ -44,20 +44,27 @@ exports.handler = async (event) => {
       let inventoryResult;
       try {
         inventoryResult = await withSpan('check-inventory', async (inventorySpan) => {
-          inventorySpan.setAttribute('service', 'inventory');
-          inventorySpan.setAttribute('order.id', orderId);
+          addSpanAttributes({
+            'service': 'inventory',
+            'order.id': orderId,
+          });
           
           const result = await callService(inventoryUrl, {
             orderId,
             items,
           });
           
-          inventorySpan.setAttribute('inventory.available', result.available);
+          addSpanAttributes({
+            'inventory.available': result.available,
+          });
+          
           return result;
         });
       } catch (error) {
-        span.setStatus({ code: api.SpanStatusCode.ERROR, message: 'Inventory check failed' });
-        span.recordException(error);
+        addSpanAttributes({
+          'error': true,
+          'error.message': 'Inventory check failed',
+        });
         return createResponse(500, {
           success: false,
           orderId,
@@ -67,8 +74,10 @@ exports.handler = async (event) => {
       }
 
       if (!inventoryResult.available) {
-        span.setAttribute('inventory.status', 'out-of-stock');
-        span.setAttribute('inventory.unavailable_items', JSON.stringify(inventoryResult.unavailableItems || []));
+        addSpanAttributes({
+          'inventory.status': 'out-of-stock',
+          'inventory.unavailable_items': JSON.stringify(inventoryResult.unavailableItems || []),
+        });
         
         console.log(`Order ${orderId} failed: Items out of stock`);
         return createResponse(409, {
@@ -79,7 +88,7 @@ exports.handler = async (event) => {
         });
       }
 
-      span.setAttribute('inventory.status', 'available');
+      addSpanAttributes({ 'inventory.status': 'available' });
 
       // Step 2: Process payment
       console.log('Step 2: Processing payment');
@@ -88,12 +97,14 @@ exports.handler = async (event) => {
       let paymentResult;
       try {
         paymentResult = await withSpan('process-payment', async (paymentSpan) => {
-          paymentSpan.setAttribute('service', 'payment');
-          paymentSpan.setAttribute('order.id', orderId);
-          paymentSpan.setAttribute('payment.method', paymentMethod);
-          
           const totalAmount = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-          paymentSpan.setAttribute('payment.amount', totalAmount);
+          
+          addSpanAttributes({
+            'service': 'payment',
+            'order.id': orderId,
+            'payment.method': paymentMethod,
+            'payment.amount': totalAmount,
+          });
           
           const result = await callService(paymentUrl, {
             orderId,
@@ -102,14 +113,18 @@ exports.handler = async (event) => {
             paymentMethod,
           });
           
-          paymentSpan.setAttribute('payment.success', result.success);
-          paymentSpan.setAttribute('payment.transaction_id', result.transactionId);
+          addSpanAttributes({
+            'payment.success': result.success,
+            'payment.transaction_id': result.transactionId || 'none',
+          });
           
           return result;
         });
       } catch (error) {
-        span.setStatus({ code: api.SpanStatusCode.ERROR, message: 'Payment processing failed' });
-        span.recordException(error);
+        addSpanAttributes({
+          'error': true,
+          'error.message': 'Payment processing failed',
+        });
         return createResponse(500, {
           success: false,
           orderId,
@@ -119,8 +134,10 @@ exports.handler = async (event) => {
       }
 
       if (!paymentResult.success) {
-        span.setAttribute('payment.status', 'failed');
-        span.setAttribute('payment.failure_reason', paymentResult.reason || 'unknown');
+        addSpanAttributes({
+          'payment.status': 'failed',
+          'payment.failure_reason': paymentResult.reason || 'unknown',
+        });
         
         console.log(`Order ${orderId} failed: Payment failed`);
         return createResponse(402, {
@@ -131,12 +148,13 @@ exports.handler = async (event) => {
         });
       }
 
-      span.setAttribute('payment.status', 'success');
-      span.setAttribute('payment.transaction_id', paymentResult.transactionId);
+      addSpanAttributes({
+        'payment.status': 'success',
+        'payment.transaction_id': paymentResult.transactionId,
+      });
 
       // Order successful
       console.log(`Order ${orderId} completed successfully`);
-      span.setStatus({ code: api.SpanStatusCode.OK });
       
       return createResponse(200, {
         success: true,
@@ -148,8 +166,10 @@ exports.handler = async (event) => {
 
     } catch (error) {
       console.error('Order processing error:', error);
-      span.setStatus({ code: api.SpanStatusCode.ERROR, message: error.message });
-      span.recordException(error);
+      addSpanAttributes({
+        'error': true,
+        'error.message': error.message,
+      });
       
       return createResponse(500, {
         success: false,

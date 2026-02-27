@@ -1,84 +1,115 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Lambda OpenTelemetry Demo - Order, Inventory, and Payment Services
+Description: Lambda OpenTelemetry Demo - Order, Inventory, and Payment Services with ADOT Layer
 
 Globals:
   Function:
     Timeout: 30
     MemorySize: 512
-    Runtime: nodejs18.x
+    Runtime: nodejs20.x
     Environment:
       Variables:
-        ENVIRONMENT: production
+        AWS_LAMBDA_EXEC_WRAPPER: /opt/otel-handler
+        OTEL_SERVICE_NAME: will-be-overridden
+        OTEL_TRACES_SAMPLER: AlwaysOn
+        OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
         OTEL_EXPORTER_OTLP_ENDPOINT: !Ref OtelCollectorEndpoint
+        OTEL_PROPAGATORS: tracecontext
+        OTEL_RESOURCE_ATTRIBUTES: !Sub deployment.environment=${Environment}
 
 Parameters:
   OtelCollectorEndpoint:
     Type: String
-    Default: 'http://localhost:4318/v1/traces'
-    Description: OpenTelemetry Collector endpoint URL
+    Default: 'http://localhost:4318'
+    Description: OpenTelemetry Collector endpoint URL (without /v1/traces path)
+  
+  Environment:
+    Type: String
+    Default: 'production'
+    Description: Deployment environment (e.g., development, staging, production)
+  
+  AdotLayerArn:
+    Type: String
+    Default: 'arn:aws:lambda:us-east-1:901920570463:layer:aws-otel-nodejs-amd64-ver-1-18-1:5'
+    Description: |
+      ARN of the AWS Distro for OpenTelemetry (ADOT) Lambda Layer for Node.js.
+      Find the latest ARN for your region at:
+      https://aws-otel.github.io/docs/getting-started/lambda/lambda-js
 
 Resources:
   # Order Service Function
   OrderServiceFunction:
     Type: AWS::Serverless::Function
     Metadata:
-      BuildMethod: nodejs18.x
+      BuildMethod: nodejs20.x
     Properties:
       FunctionName: order-service
       CodeUri: ./
       Handler: src/order-service/index.handler
       Description: Order Service - Orchestrates order processing
+      Layers:
+        - !Ref AdotLayerArn
       Environment:
         Variables:
-          INVENTORY_SERVICE_URL: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/inventory'
-          PAYMENT_SERVICE_URL: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/payment'
+          OTEL_SERVICE_NAME: order-service
+          INVENTORY_SERVICE_URL: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod/inventory'
+          PAYMENT_SERVICE_URL: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod/payment'
       Events:
         OrderApi:
           Type: Api
           Properties:
             Path: /order
             Method: post
-            RestApiId: !Ref ServerlessRestApi
+            RestApiId: !Ref ApiGateway
 
   # Inventory Service Function
   InventoryServiceFunction:
     Type: AWS::Serverless::Function
     Metadata:
-      BuildMethod: nodejs18.x
+      BuildMethod: nodejs20.x
     Properties:
       FunctionName: inventory-service
       CodeUri: ./
       Handler: src/inventory-service/index.handler
       Description: Inventory Service - Checks item availability
+      Layers:
+        - !Ref AdotLayerArn
+      Environment:
+        Variables:
+          OTEL_SERVICE_NAME: inventory-service
       Events:
         InventoryApi:
           Type: Api
           Properties:
             Path: /inventory
             Method: post
-            RestApiId: !Ref ServerlessRestApi
+            RestApiId: !Ref ApiGateway
 
   # Payment Service Function
   PaymentServiceFunction:
     Type: AWS::Serverless::Function
     Metadata:
-      BuildMethod: nodejs18.x
+      BuildMethod: nodejs20.x
     Properties:
       FunctionName: payment-service
       CodeUri: ./
       Handler: src/payment-service/index.handler
       Description: Payment Service - Processes payments
+      Layers:
+        - !Ref AdotLayerArn
+      Environment:
+        Variables:
+          OTEL_SERVICE_NAME: payment-service
       Events:
         PaymentApi:
           Type: Api
           Properties:
             Path: /payment
             Method: post
-            RestApiId: !Ref ServerlessRestApi
+            RestApiId: !Ref ApiGateway
 
   # API Gateway
-  ServerlessRestApi:
+  ApiGateway:
     Type: AWS::Serverless::Api
     Properties:
       StageName: Prod
@@ -87,16 +118,20 @@ Resources:
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL
-    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod'
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod'
   
   OrderServiceUrl:
     Description: Order Service endpoint
-    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/order'
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod/order'
     
   InventoryServiceUrl:
     Description: Inventory Service endpoint
-    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/inventory'
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod/inventory'
     
   PaymentServiceUrl:
     Description: Payment Service endpoint
-    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/payment'
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod/payment'
+  
+  AdotLayerVersion:
+    Description: ADOT Lambda Layer ARN being used
+    Value: !Ref AdotLayerArn
