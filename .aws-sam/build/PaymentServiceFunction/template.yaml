@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Lambda OpenTelemetry Demo - Order, Inventory, and Payment Services with ADOT Layer
+Description: Lambda OpenTelemetry Demo - Order, Inventory, and Payment Services with AWS ADOT Layer
 
 Globals:
   Function:

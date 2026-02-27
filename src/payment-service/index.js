@@ -40,7 +40,7 @@ function processPayment(paymentMethod, amount) {
   // Successful payment
   return {
     success: true,
-    transactionId: `txn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    transactionId: `txn-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
   };
 }
 
