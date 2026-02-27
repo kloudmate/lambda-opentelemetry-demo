@@ -1,0 +1,23 @@
+{
+  "name": "lambda-opentelemetry-demo",
+  "version": "1.0.0",
+  "description": "Sample AWS Lambda project demonstrating OpenTelemetry integration without CloudWatch/X-Ray",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"No tests specified\" && exit 0",
+    "deploy": "sam deploy --guided",
+    "build": "sam build"
+  },
+  "keywords": [
+    "aws",
+    "lambda",
+    "opentelemetry",
+    "tracing",
+    "nodejs"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.13.5"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "successfulOrder": {
+    "orderId": "ORD-001",
+    "customerId": "CUST-123",
+    "paymentMethod": "credit-card-5555",
+    "items": [
+      {
+        "itemId": "item-001",
+        "name": "Laptop",
+        "quantity": 1,
+        "price": 999.99
+      },
+      {
+        "itemId": "item-002",
+        "name": "Mouse",
+        "quantity": 2,
+        "price": 29.99
+      }
+    ]
+  },
+  "outOfStockOrder": {
+    "orderId": "ORD-002",
+    "customerId": "CUST-456",
+    "paymentMethod": "credit-card-5555",
+    "items": [
+      {
+        "itemId": "item-003",
+        "name": "Keyboard",
+        "quantity": 1,
+        "price": 79.99
+      },
+      {
+        "itemId": "item-005",
+        "name": "Headphones",
+        "quantity": 1,
+        "price": 149.99
+      }
+    ]
+  },
+  "paymentFailureOrder": {
+    "orderId": "ORD-003",
+    "customerId": "CUST-789",
+    "paymentMethod": "4111111111111111",
+    "items": [
+      {
+        "itemId": "item-001",
+        "name": "Laptop",
+        "quantity": 1,
+        "price": 999.99
+      }
+    ]
+  },
+  "insufficientFundsOrder": {
+    "orderId": "ORD-004",
+    "customerId": "CUST-999",
+    "paymentMethod": "4222222222222222",
+    "items": [
+      {
+        "itemId": "item-004",
+        "name": "Monitor",
+        "quantity": 2,
+        "price": 399.99
+      }
+    ]
+  }
+}
